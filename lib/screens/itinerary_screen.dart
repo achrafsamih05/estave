@@ -4,155 +4,148 @@ import 'package:provider/provider.dart';
 
 import '../models/trip_plan.dart';
 import '../providers/trip_provider.dart';
-import '../widgets/timeline_tile.dart';
 
-/// Displays the generated [TripPlan] as a clean, scrollable timeline
-/// with per-day sections and a total-cost header.
+/// Final result screen.
+///
+/// - Scrollable `ListView.builder` for day-by-day content.
+/// - Each day rendered as an `ExpansionTile` (first day expanded by default).
+/// - "Save Trip" button persists the plan via SharedPreferences.
+/// - Responsive: content is centered and capped at 720 px on wide screens.
 class ItineraryScreen extends StatelessWidget {
   const ItineraryScreen({super.key});
+
+  static const double _maxContentWidth = 720;
 
   @override
   Widget build(BuildContext context) {
     final provider = context.watch<TripProvider>();
     final plan = provider.plan;
 
-    if (plan == null) {
-      return const Scaffold(
-        body: Center(child: Text('No itinerary yet.')),
+    if (plan == null || plan.isEmpty) {
+      return Scaffold(
+        appBar: AppBar(title: const Text('Your Trip')),
+        body: const Center(child: Text('No itinerary to display yet.')),
       );
     }
 
     return Scaffold(
-      body: CustomScrollView(
-        slivers: [
-          _HeaderSliver(plan: plan),
-          SliverPadding(
-            padding: const EdgeInsets.fromLTRB(20, 8, 20, 40),
-            sliver: SliverList.separated(
-              itemCount: plan.dailyActivities.length,
-              separatorBuilder: (_, __) => const SizedBox(height: 24),
-              itemBuilder: (context, i) => _DaySection(
-                day: plan.dailyActivities[i],
-                currency: plan.currency,
-              ),
+      body: SafeArea(
+        child: Center(
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: _maxContentWidth),
+            child: CustomScrollView(
+              slivers: [
+                SliverToBoxAdapter(child: _TripHeader(plan: plan)),
+                SliverPadding(
+                  padding: const EdgeInsets.fromLTRB(16, 12, 16, 120),
+                  sliver: SliverList(
+                    // ListView.builder equivalent inside a CustomScrollView,
+                    // so the header scrolls with the list.
+                    delegate: SliverChildBuilderDelegate(
+                      (context, index) => _DayCard(
+                        day: plan.days[index],
+                        initiallyExpanded: index == 0,
+                      ),
+                      childCount: plan.days.length,
+                    ),
+                  ),
+                ),
+              ],
             ),
-          ),
-        ],
-      ),
-      bottomNavigationBar: SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(20, 8, 20, 12),
-          child: FilledButton.icon(
-            onPressed: () {
-              context.read<TripProvider>().reset();
-              Navigator.of(context).popUntil((r) => r.isFirst);
-            },
-            icon: const Icon(Icons.refresh),
-            label: const Text('Plan Another Trip'),
           ),
         ),
       ),
+      bottomNavigationBar: _BottomActions(maxWidth: _maxContentWidth),
     );
   }
 }
 
-/// Gradient hero header showing destination + totals.
-class _HeaderSliver extends StatelessWidget {
+// ---------------------------------------------------------------------------
+// Header
+// ---------------------------------------------------------------------------
+
+class _TripHeader extends StatelessWidget {
   final TripPlan plan;
-  const _HeaderSliver({required this.plan});
+  const _TripHeader({required this.plan});
 
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
-    final currencyFmt = NumberFormat.simpleCurrency(name: plan.currency);
+    final currencyFmt = NumberFormat.simpleCurrency(name: 'USD');
 
-    // Fallback: if Gemini's budget_estimate is 0, sum activity costs.
-    final total =
-        plan.budgetEstimate > 0 ? plan.budgetEstimate : plan.computedTotalCost;
-
-    return SliverToBoxAdapter(
-      child: Container(
-        padding: const EdgeInsets.fromLTRB(20, 16, 20, 28),
-        decoration: BoxDecoration(
-          gradient: LinearGradient(
-            colors: [scheme.primary, scheme.primary.withValues(alpha: 0.85)],
-            begin: Alignment.topLeft,
-            end: Alignment.bottomRight,
-          ),
-          borderRadius: const BorderRadius.vertical(
-            bottom: Radius.circular(32),
-          ),
+    return Container(
+      padding: const EdgeInsets.fromLTRB(20, 16, 20, 28),
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          colors: [scheme.primary, scheme.primary.withValues(alpha: 0.85)],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
         ),
-        child: SafeArea(
-          bottom: false,
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
+        borderRadius: const BorderRadius.vertical(
+          bottom: Radius.circular(28),
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
             children: [
-              Row(
-                children: [
-                  IconButton(
-                    onPressed: () => Navigator.of(context).maybePop(),
-                    icon: const Icon(Icons.arrow_back, color: Colors.white),
-                  ),
-                  const Spacer(),
-                  const Icon(Icons.bookmark_border, color: Colors.white),
-                ],
+              IconButton(
+                onPressed: () => Navigator.of(context).maybePop(),
+                icon: const Icon(Icons.arrow_back, color: Colors.white),
               ),
-              const SizedBox(height: 8),
-              const Row(
-                children: [
-                  Icon(Icons.place, color: Colors.white70, size: 18),
-                  SizedBox(width: 4),
-                  Text(
-                    'YOUR TRIP',
-                    style: TextStyle(
-                      color: Colors.white70,
-                      fontWeight: FontWeight.w700,
-                      letterSpacing: 1.2,
-                      fontSize: 12,
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 6),
-              Text(
-                plan.destination,
-                style: const TextStyle(
+              const Spacer(),
+              Consumer<TripProvider>(
+                builder: (_, p, __) => Icon(
+                  p.isSaved ? Icons.bookmark : Icons.bookmark_border,
                   color: Colors.white,
-                  fontWeight: FontWeight.w800,
-                  fontSize: 28,
-                  height: 1.1,
                 ),
-              ),
-              if (plan.summary.isNotEmpty) ...[
-                const SizedBox(height: 10),
-                Text(
-                  plan.summary,
-                  style: const TextStyle(
-                    color: Colors.white70,
-                    height: 1.4,
-                  ),
-                ),
-              ],
-              const SizedBox(height: 20),
-              Row(
-                children: [
-                  _Stat(
-                    icon: Icons.calendar_month,
-                    label: 'Duration',
-                    value: '${plan.totalDays} days',
-                  ),
-                  const SizedBox(width: 12),
-                  _Stat(
-                    icon: Icons.account_balance_wallet_outlined,
-                    label: 'Est. Budget',
-                    value: currencyFmt.format(total),
-                  ),
-                ],
               ),
             ],
           ),
-        ),
+          const SizedBox(height: 8),
+          const Row(
+            children: [
+              Icon(Icons.travel_explore, color: Colors.white70, size: 18),
+              SizedBox(width: 4),
+              Text(
+                'YOUR TRIP',
+                style: TextStyle(
+                  color: Colors.white70,
+                  fontWeight: FontWeight.w700,
+                  letterSpacing: 1.2,
+                  fontSize: 12,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 6),
+          Text(
+            plan.tripName.isEmpty ? 'Your Itinerary' : plan.tripName,
+            style: const TextStyle(
+              color: Colors.white,
+              fontWeight: FontWeight.w800,
+              fontSize: 28,
+              height: 1.15,
+            ),
+          ),
+          const SizedBox(height: 18),
+          Row(
+            children: [
+              _Stat(
+                icon: Icons.calendar_month,
+                label: 'Duration',
+                value: '${plan.totalDays} day${plan.totalDays == 1 ? '' : 's'}',
+              ),
+              const SizedBox(width: 12),
+              _Stat(
+                icon: Icons.account_balance_wallet_outlined,
+                label: 'Total Budget',
+                value: currencyFmt.format(plan.totalBudget),
+              ),
+            ],
+          ),
+        ],
       ),
     );
   }
@@ -200,6 +193,7 @@ class _Stat extends StatelessWidget {
                       fontWeight: FontWeight.w700,
                       fontSize: 14,
                     ),
+                    overflow: TextOverflow.ellipsis,
                   ),
                 ],
               ),
@@ -211,68 +205,238 @@ class _Stat extends StatelessWidget {
   }
 }
 
-class _DaySection extends StatelessWidget {
+// ---------------------------------------------------------------------------
+// Day card
+// ---------------------------------------------------------------------------
+
+class _DayCard extends StatelessWidget {
   final TripDay day;
-  final String currency;
-  const _DaySection({required this.day, required this.currency});
+  final bool initiallyExpanded;
+
+  const _DayCard({
+    required this.day,
+    this.initiallyExpanded = false,
+  });
 
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
-    final currencyFmt = NumberFormat.simpleCurrency(name: currency);
 
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Row(
-          children: [
-            Container(
-              padding: const EdgeInsets.symmetric(
-                horizontal: 10,
-                vertical: 6,
-              ),
-              decoration: BoxDecoration(
-                color: scheme.primary,
-                borderRadius: BorderRadius.circular(8),
-              ),
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 12),
+      child: Card(
+        margin: EdgeInsets.zero,
+        clipBehavior: Clip.antiAlias,
+        child: Theme(
+          // Remove ExpansionTile's default dividers for a cleaner look.
+          data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
+          child: ExpansionTile(
+            initiallyExpanded: initiallyExpanded,
+            tilePadding:
+                const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+            childrenPadding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+            leading: CircleAvatar(
+              backgroundColor: scheme.primary,
               child: Text(
-                'Day ${day.day}',
+                '${day.day}',
                 style: const TextStyle(
                   color: Colors.white,
                   fontWeight: FontWeight.w800,
-                  fontSize: 12,
-                  letterSpacing: 0.5,
                 ),
               ),
             ),
-            const SizedBox(width: 10),
-            Expanded(
-              child: Text(
-                day.title ?? 'Explore',
-                style: const TextStyle(
-                  fontWeight: FontWeight.w800,
-                  fontSize: 18,
-                ),
+            title: Text(
+              'Day ${day.day}',
+              style: const TextStyle(
+                fontWeight: FontWeight.w800,
+                fontSize: 16,
               ),
             ),
-            Text(
-              currencyFmt.format(day.dayCost),
-              style: TextStyle(
-                color: Colors.grey.shade700,
-                fontWeight: FontWeight.w700,
-              ),
+            subtitle: Text(
+              '${day.activities.length} activit${day.activities.length == 1 ? 'y' : 'ies'}',
+              style: TextStyle(color: Colors.grey.shade700),
             ),
-          ],
+            children: day.activities.isEmpty
+                ? [
+                    const Padding(
+                      padding: EdgeInsets.symmetric(vertical: 8),
+                      child: Text('No activities planned for this day.'),
+                    ),
+                  ]
+                : List.generate(day.activities.length, (i) {
+                    return _ActivityRow(
+                      activity: day.activities[i],
+                      isLast: i == day.activities.length - 1,
+                    );
+                  }),
+          ),
         ),
-        const SizedBox(height: 14),
-        ...List.generate(day.activities.length, (i) {
-          return TimelineTile(
-            activity: day.activities[i],
-            isLast: i == day.activities.length - 1,
-            currency: currency,
-          );
-        }),
-      ],
+      ),
+    );
+  }
+}
+
+class _ActivityRow extends StatelessWidget {
+  final Activity activity;
+  final bool isLast;
+
+  const _ActivityRow({required this.activity, required this.isLast});
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+
+    return Padding(
+      padding: EdgeInsets.only(bottom: isLast ? 0 : 12),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // Time badge
+          Container(
+            width: 64,
+            padding: const EdgeInsets.symmetric(vertical: 6),
+            decoration: BoxDecoration(
+              color: scheme.primary.withValues(alpha: 0.1),
+              borderRadius: BorderRadius.circular(10),
+            ),
+            alignment: Alignment.center,
+            child: Text(
+              activity.time.isEmpty ? '--:--' : activity.time,
+              style: TextStyle(
+                color: scheme.primary,
+                fontWeight: FontWeight.w700,
+                fontSize: 13,
+              ),
+            ),
+          ),
+          const SizedBox(width: 12),
+
+          // Text block
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                if (activity.desc.isNotEmpty)
+                  Text(
+                    activity.desc,
+                    style: const TextStyle(
+                      fontWeight: FontWeight.w600,
+                      fontSize: 14,
+                      height: 1.3,
+                    ),
+                  ),
+                if (activity.location.isNotEmpty) ...[
+                  const SizedBox(height: 4),
+                  Row(
+                    children: [
+                      Icon(
+                        Icons.place_outlined,
+                        size: 14,
+                        color: Colors.grey.shade600,
+                      ),
+                      const SizedBox(width: 4),
+                      Expanded(
+                        child: Text(
+                          activity.location,
+                          style: TextStyle(
+                            color: Colors.grey.shade700,
+                            fontSize: 12,
+                          ),
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Bottom action bar (Save + Plan Another)
+// ---------------------------------------------------------------------------
+
+class _BottomActions extends StatelessWidget {
+  final double maxWidth;
+  const _BottomActions({required this.maxWidth});
+
+  Future<void> _onSave(BuildContext context) async {
+    final provider = context.read<TripProvider>();
+    final messenger = ScaffoldMessenger.of(context);
+
+    final ok = await provider.saveCurrentTrip();
+    if (!context.mounted) return;
+
+    messenger.showSnackBar(
+      SnackBar(
+        content: Text(ok ? 'Trip saved!' : 'Could not save the trip.'),
+        behavior: SnackBarBehavior.floating,
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return SafeArea(
+      child: Center(
+        child: ConstrainedBox(
+          constraints: BoxConstraints(maxWidth: maxWidth),
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(16, 8, 16, 12),
+            child: Consumer<TripProvider>(
+              builder: (context, provider, _) {
+                final saving = provider.isSaving;
+                final saved = provider.isSaved;
+
+                return Row(
+                  children: [
+                    Expanded(
+                      child: OutlinedButton.icon(
+                        onPressed: () {
+                          context.read<TripProvider>().reset();
+                          Navigator.of(context).popUntil((r) => r.isFirst);
+                        },
+                        style: OutlinedButton.styleFrom(
+                          minimumSize: const Size.fromHeight(52),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(16),
+                          ),
+                        ),
+                        icon: const Icon(Icons.refresh),
+                        label: const Text('Plan Another'),
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      flex: 2,
+                      child: FilledButton.icon(
+                        onPressed: saving || saved
+                            ? null
+                            : () => _onSave(context),
+                        icon: Icon(
+                          saved ? Icons.check_circle : Icons.bookmark_add,
+                        ),
+                        label: Text(
+                          saving
+                              ? 'Saving...'
+                              : saved
+                                  ? 'Saved'
+                                  : 'Save Trip',
+                        ),
+                      ),
+                    ),
+                  ],
+                );
+              },
+            ),
+          ),
+        ),
+      ),
     );
   }
 }
