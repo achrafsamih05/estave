@@ -1,167 +1,168 @@
 import 'dart:convert';
 
-/// A single activity within a day's itinerary.
+/// Data model for the Estrave trip plan.
 ///
-/// Example JSON:
+/// Matches the strict Gemini schema:
 /// ```json
 /// {
-///   "time": "09:00",
-///   "activity": "Visit the Louvre",
-///   "description": "Explore world-class art collections",
-///   "cost": 17.0
-/// }
-/// ```
-class DailyActivity {
-  final String time;
-  final String activity;
-  final String description;
-  final double cost;
-
-  const DailyActivity({
-    required this.time,
-    required this.activity,
-    required this.description,
-    required this.cost,
-  });
-
-  factory DailyActivity.fromJson(Map<String, dynamic> json) {
-    return DailyActivity(
-      time: (json['time'] ?? '').toString(),
-      activity: (json['activity'] ?? '').toString(),
-      description: (json['description'] ?? '').toString(),
-      cost: _parseDouble(json['cost']),
-    );
-  }
-
-  Map<String, dynamic> toJson() => {
-        'time': time,
-        'activity': activity,
-        'description': description,
-        'cost': cost,
-      };
-}
-
-/// A single day in the trip plan, containing an ordered list of activities.
-class TripDay {
-  final int day;
-  final String? title;
-  final List<DailyActivity> activities;
-
-  const TripDay({
-    required this.day,
-    this.title,
-    required this.activities,
-  });
-
-  /// Returns the total cost of all activities in this day.
-  double get dayCost =>
-      activities.fold(0.0, (sum, a) => sum + a.cost);
-
-  factory TripDay.fromJson(Map<String, dynamic> json) {
-    final rawActivities = json['activities'] as List? ?? [];
-    return TripDay(
-      day: _parseInt(json['day']),
-      title: json['title']?.toString(),
-      activities: rawActivities
-          .whereType<Map>()
-          .map((e) => DailyActivity.fromJson(e.cast<String, dynamic>()))
-          .toList(),
-    );
-  }
-
-  Map<String, dynamic> toJson() => {
-        'day': day,
-        'title': title,
-        'activities': activities.map((a) => a.toJson()).toList(),
-      };
-}
-
-/// The full trip plan returned by Gemini.
-///
-/// Expected strict JSON shape:
-/// ```json
-/// {
-///   "destination": "Paris, France",
-///   "total_days": 3,
-///   "budget_estimate": 850.0,
-///   "currency": "USD",
-///   "summary": "A cultural 3-day journey through Paris.",
-///   "daily_activities": [
+///   "trip_name": "",
+///   "total_budget": 0,
+///   "days": [
 ///     {
 ///       "day": 1,
-///       "title": "Classic Paris",
 ///       "activities": [
-///         { "time": "09:00", "activity": "...", "description": "...", "cost": 17.0 }
+///         { "time": "", "desc": "", "location": "" }
 ///       ]
 ///     }
 ///   ]
 /// }
 /// ```
-class TripPlan {
-  final String destination;
-  final int totalDays;
-  final double budgetEstimate;
-  final String currency;
-  final String summary;
-  final List<TripDay> dailyActivities;
+///
+/// Every `fromJson` is null-safe: any missing or mistyped field
+/// falls back to a sensible default, so the UI never crashes on a
+/// malformed AI response.
 
-  const TripPlan({
-    required this.destination,
-    required this.totalDays,
-    required this.budgetEstimate,
-    required this.currency,
-    required this.summary,
-    required this.dailyActivities,
+// ---------- Activity ----------
+
+class Activity {
+  final String time;
+  final String desc;
+  final String location;
+
+  const Activity({
+    required this.time,
+    required this.desc,
+    required this.location,
   });
 
-  /// Total cost computed from all daily activities (fallback-friendly).
-  double get computedTotalCost =>
-      dailyActivities.fold(0.0, (sum, d) => sum + d.dayCost);
+  static const Activity empty = Activity(time: '', desc: '', location: '');
 
-  factory TripPlan.fromJson(Map<String, dynamic> json) {
-    final rawDays = json['daily_activities'] as List? ?? [];
-    return TripPlan(
-      destination: (json['destination'] ?? '').toString(),
-      totalDays: _parseInt(json['total_days']),
-      budgetEstimate: _parseDouble(json['budget_estimate']),
-      currency: (json['currency'] ?? 'USD').toString(),
-      summary: (json['summary'] ?? '').toString(),
-      dailyActivities: rawDays
-          .whereType<Map>()
-          .map((e) => TripDay.fromJson(e.cast<String, dynamic>()))
-          .toList(),
+  /// Defensive: accepts any map or null and coerces each field.
+  factory Activity.fromJson(Map<String, dynamic>? json) {
+    if (json == null) return Activity.empty;
+    return Activity(
+      time: _asString(json['time']),
+      desc: _asString(json['desc']),
+      location: _asString(json['location']),
     );
   }
 
   Map<String, dynamic> toJson() => {
-        'destination': destination,
-        'total_days': totalDays,
-        'budget_estimate': budgetEstimate,
-        'currency': currency,
-        'summary': summary,
-        'daily_activities':
-            dailyActivities.map((d) => d.toJson()).toList(),
+        'time': time,
+        'desc': desc,
+        'location': location,
+      };
+}
+
+// ---------- TripDay ----------
+
+class TripDay {
+  final int day;
+  final List<Activity> activities;
+
+  const TripDay({required this.day, required this.activities});
+
+  factory TripDay.fromJson(Map<String, dynamic>? json) {
+    if (json == null) return const TripDay(day: 0, activities: []);
+
+    final rawActivities = json['activities'];
+    final activities = rawActivities is List
+        ? rawActivities
+            .whereType<Map>()
+            .map((e) => Activity.fromJson(e.cast<String, dynamic>()))
+            .toList()
+        : <Activity>[];
+
+    return TripDay(
+      day: _asInt(json['day']),
+      activities: activities,
+    );
+  }
+
+  Map<String, dynamic> toJson() => {
+        'day': day,
+        'activities': activities.map((a) => a.toJson()).toList(),
+      };
+}
+
+// ---------- TripPlan ----------
+
+class TripPlan {
+  final String tripName;
+  final double totalBudget;
+  final List<TripDay> days;
+
+  const TripPlan({
+    required this.tripName,
+    required this.totalBudget,
+    required this.days,
+  });
+
+  static const TripPlan empty =
+      TripPlan(tripName: '', totalBudget: 0, days: []);
+
+  /// True when the plan has no meaningful content.
+  bool get isEmpty => days.isEmpty;
+
+  /// Total number of days in the plan.
+  int get totalDays => days.length;
+
+  /// Defensive factory: guards against every field being missing,
+  /// `null`, or of the wrong runtime type. Guarantees a usable object.
+  factory TripPlan.fromJson(Map<String, dynamic>? json) {
+    if (json == null) return TripPlan.empty;
+
+    final rawDays = json['days'];
+    final days = rawDays is List
+        ? rawDays
+            .whereType<Map>()
+            .map((e) => TripDay.fromJson(e.cast<String, dynamic>()))
+            .toList()
+        : <TripDay>[];
+
+    return TripPlan(
+      tripName: _asString(json['trip_name']),
+      totalBudget: _asDouble(json['total_budget']),
+      days: days,
+    );
+  }
+
+  Map<String, dynamic> toJson() => {
+        'trip_name': tripName,
+        'total_budget': totalBudget,
+        'days': days.map((d) => d.toJson()).toList(),
       };
 
-  /// Serialize to a persistable JSON string.
+  /// Serialize to a persistable JSON string (used by SharedPreferences).
   String encode() => jsonEncode(toJson());
 
-  /// Parse from a persisted JSON string.
-  static TripPlan decode(String source) =>
-      TripPlan.fromJson(jsonDecode(source) as Map<String, dynamic>);
+  /// Parse from a persisted JSON string. Throws [FormatException] if
+  /// the string isn't a valid JSON object.
+  static TripPlan decode(String source) {
+    final decoded = jsonDecode(source);
+    if (decoded is! Map<String, dynamic>) {
+      throw const FormatException('Expected a JSON object.');
+    }
+    return TripPlan.fromJson(decoded);
+  }
 }
 
-// ---------- Helpers ----------
+// ---------- Private coercion helpers ----------
 
-double _parseDouble(dynamic v) {
-  if (v == null) return 0.0;
-  if (v is num) return v.toDouble();
-  return double.tryParse(v.toString()) ?? 0.0;
+String _asString(dynamic v) {
+  if (v == null) return '';
+  return v.toString();
 }
 
-int _parseInt(dynamic v) {
+int _asInt(dynamic v) {
   if (v == null) return 0;
   if (v is int) return v;
   if (v is num) return v.toInt();
   return int.tryParse(v.toString()) ?? 0;
+}
+
+double _asDouble(dynamic v) {
+  if (v == null) return 0.0;
+  if (v is num) return v.toDouble();
+  return double.tryParse(v.toString()) ?? 0.0;
 }

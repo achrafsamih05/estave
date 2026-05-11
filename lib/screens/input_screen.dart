@@ -65,11 +65,15 @@ class _InputScreenState extends State<InputScreen> {
 
     return Scaffold(
       body: SafeArea(
-        child: SingleChildScrollView(
-          padding: const EdgeInsets.fromLTRB(20, 20, 20, 40),
-          child: Form(
-            key: _formKey,
-            child: Column(
+        child: Center(
+          child: ConstrainedBox(
+            // Responsive: cap content width on tablets / web.
+            constraints: const BoxConstraints(maxWidth: 720),
+            child: SingleChildScrollView(
+              padding: const EdgeInsets.fromLTRB(20, 20, 20, 40),
+              child: Form(
+                key: _formKey,
+                child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 _Header(theme: theme),
@@ -148,7 +152,9 @@ class _InputScreenState extends State<InputScreen> {
                   icon: const Icon(Icons.auto_awesome),
                   label: const Text('Generate My Trip'),
                 ),
-              ],
+                  ],
+                ),
+              ),
             ),
           ),
         ),
